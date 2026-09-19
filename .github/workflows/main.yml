@@ -1,0 +1,81 @@
+name: QA Enterprise Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# 开启 GitHub Pages 部署所需的权限
+permissions:
+  contents: write
+
+jobs:
+  test-and-deploy-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. 拉取最新代码
+        uses: actions/checkout@v4
+
+      - name: 2. 拉起底层数据库与缓存 (MySQL + Redis)
+        run: |
+          # 引入 --wait 参数
+          # 流水线会在这里彻底卡住，不断探测 MySQL，直到它 100% 启动并准备就绪才会放行！
+          docker compose up -d --wait test-db redis-cache
+          
+          echo "基础设施已满血复活！"
+          
+          # 防御性托底：在 MySQL 明确就绪后，再强行灌一次 SQL，彻底粉碎找不到表的可能
+          echo "开始强行初始化表结构..."
+          cat mysql_init/*.sql | docker exec -i automation_mysql mysql -uqa_user -pqa_pass automation_shop
+          echo "表结构初始化完美收官！"
+
+      - name: 3. 配置 Python 测试环境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip' # 开启缓存，极大地加快后续流水线执行速度
+
+      - name: 4. 安装项目核心依赖
+        run: |
+          python -m pip install --upgrade pip
+          # 在最后追加了：httpx pytest-cov prometheus-fastapi-instrumentator
+          pip install pytest requests pymysql cryptography allure-pytest fastapi uvicorn pydantic pydantic-settings redis loguru hypothesis pyyaml httpx pytest-cov prometheus-fastapi-instrumentator
+      - name: 5. 启动 Mock 微服务后台 (后台静默运行)
+        run: |
+          nohup uvicorn mock_server.app:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
+          echo "等待微服务启动..."
+          sleep 5
+          # 如果探测失败，立刻打印 server.log 看看到底报了什么错，再退出！
+          curl -f http://127.0.0.1:8000/tools/data-factory || (echo -e "\n 服务启动失败，正在打印崩溃日志 (server.log)：" && cat server.log && exit 1)
+
+      - name: 6. 执行全链路深度测试
+        # 去掉具体文件名，直接跑 tests/ 目录，自动搜集并执行所有的用例
+        run: |
+          pytest tests/ --alluredir=allure-results
+
+      - name: 测试失败时打印后台崩溃日志 (Troubleshooting)
+        if: failure() # 只有当上面的测试失败时，才会触发这一步
+        run: |
+         echo "========== SERVER.LOG 崩溃详情 =========="
+         cat server.log
+         echo "==========================================="
+
+      - name: 7. 生成 Allure 可视化测试报告
+        uses: simple-elf/allure-report-action@master
+        if: always() # 无论测试成功还是失败（比如断言报错），都要生成报告！
+        id: allure-report
+        with:
+          allure_results: allure-results
+          gh_pages: gh-pages
+          allure_report: allure-report
+          allure_history: allure-history
+
+      - name: 8. 自动部署报告到 GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: always()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-history
