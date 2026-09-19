@@ -40,17 +40,22 @@ jobs:
       - name: 4. 安装项目核心依赖
         run: |
           python -m pip install --upgrade pip
-          # 在末尾追加了：langchain langchain-openai python-dotenv
+          # 追加了大模型测试 Agent 所需的核心依赖
           pip install pytest requests pymysql cryptography allure-pytest fastapi uvicorn pydantic pydantic-settings redis loguru hypothesis pyyaml httpx pytest-cov prometheus-fastapi-instrumentator langchain langchain-openai python-dotenv
+
       - name: 5. 启动 Mock 微服务后台 (后台静默运行)
         run: |
           nohup uvicorn mock_server.app:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
           echo "等待微服务启动..."
           sleep 5
-          # 核心修复：将探测地址从废弃的 /tools/data-factory 改为 FastAPI 内置的 /docs
+          # 核心修复：将探测地址改为 FastAPI 内置的 /docs，验证服务存活
           curl -f http://127.0.0.1:8000/docs || (echo -e "\n 服务启动失败，正在打印崩溃日志 (server.log)：" && cat server.log && exit 1)
+
       - name: 6. 执行全链路深度测试
-        # 去掉具体文件名，直接跑 tests/ 目录，自动搜集并执行所有的用例
+        # 核心修复：将 GitHub Secrets 安全注入到运行环境，供大模型 Agent 读取
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
         run: |
           pytest tests/ --alluredir=allure-results
 
