@@ -47,9 +47,8 @@ jobs:
           nohup uvicorn mock_server.app:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
           echo "等待微服务启动..."
           sleep 5
-          # 如果探测失败，立刻打印 server.log 看看到底报了什么错，再退出！
-          curl -f http://127.0.0.1:8000/tools/data-factory || (echo -e "\n 服务启动失败，正在打印崩溃日志 (server.log)：" && cat server.log && exit 1)
-
+          # 核心修复：将探测地址从废弃的 /tools/data-factory 改为 FastAPI 内置的 /docs
+          curl -f http://127.0.0.1:8000/docs || (echo -e "\n 服务启动失败，正在打印崩溃日志 (server.log)：" && cat server.log && exit 1)
       - name: 6. 执行全链路深度测试
         # 去掉具体文件名，直接跑 tests/ 目录，自动搜集并执行所有的用例
         run: |
