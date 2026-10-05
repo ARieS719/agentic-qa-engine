@@ -1,0 +1,22 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+venv/
+env/
+.env
+
+# 数据库文件 (绝对不能把本地数据传到云端泄露)
+*.db
+*.sqlite3
+
+# 日志文件
+logs/
+*.log
+
+# 测试报告和缓存
+.pytest_cache/
+allure-results/
+allure-report/
